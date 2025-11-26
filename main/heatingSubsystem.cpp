@@ -37,19 +37,6 @@ void setupHeating()
 
   ledcSetup(1, 20000, 10); // Set PWM freq and resolution, on Channel 1, for ESP32
   ledcAttachPin(heaterpin, 1);
-  // Serial.begin(2000000); // Serial is handled in main.ino
-  
-  T1 = millis();
-  T2 = T1;
-}
-
-void executeHeating() {
- currtime = millis();
- 
- // 100 ms update period
- if (currtime - T1 > 100) { 
-  T1 = currtime; 
-  
   Vadc = Kadc * analogRead(thermistorpin);
 
   // Avoid division by zero if Vadc is Vcc (unlikely but possible)

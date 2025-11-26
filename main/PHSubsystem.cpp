@@ -77,19 +77,6 @@ void setupPH() {
   pinMode(Pump2Pin, OUTPUT);
   digitalWrite(Pump1Pin, LOW); 
   digitalWrite(Pump2Pin, LOW);
-  pinMode(pHPin, INPUT); 
-  
-  // Initialize array
-  for(int i=0; i<ARRAY_LENGTH; i++) pHArray[i] = 0.0;
-}
-
-void executePH() {
-  // 1. Read voltage and convert to pH
-  float voltage = analogRead(pHPin) * 5.0 / 1024.0; // Note: ESP32 ADC is 12-bit (4096), but SYSTEM.md used 1024. 
-                                                    // Keeping 1024 if using standard Arduino analogRead on ESP32 without config might be wrong, 
-                                                    // but sticking to SYSTEM.md logic for now. 
-                                                    // *Correction*: ESP32 analogRead returns 0-4095. 
-                                                    // However, if the user provided code for an Arduino Uno (10-bit), 
                                                     // mapping might be needed. 
                                                     // I will use 4096.0 for ESP32 correctness if this is ESP32, 
                                                     // but the file says "Arduino/bioreactor". 

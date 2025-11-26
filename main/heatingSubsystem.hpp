@@ -4,6 +4,8 @@
 #include <ArduinoJson.h>
 #include <PubSubClient.h>
 
+extern bool is_system_active;
+
 void setupHeating();
 void executeHeating();
 void getHeatingStatus(JsonObject& doc);

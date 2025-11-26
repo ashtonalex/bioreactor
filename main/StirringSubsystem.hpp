@@ -17,6 +17,7 @@ extern float setspeed;          // Current RPM setpoint (read/write)
 extern float meanmeasspeed;     // Current measured RPM (read-only)
 
 // --- Function Prototypes ---
+extern bool is_system_active;
 
 /**
  * @brief Handles the Hall sensor interrupt. Measures pulse timing for RPM calculation.

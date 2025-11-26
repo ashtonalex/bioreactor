@@ -100,6 +100,12 @@ void setupStirring() {
 // 3. EXECUTION FUNCTION
 // -------------------------------------------------------------
 void executeStirring() {
+  // 1. Safety Check: If system is not active, force off and exit
+  if (!is_system_active) {
+    ledcWrite(0, 0); // Force PWM duty cycle to 0
+    return; 
+  }
+
   // --- A. Serial Command Input (Local Test Override) ---
   if (Serial.available()) {
     String cmd = Serial.readStringUntil('\n');

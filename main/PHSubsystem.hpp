@@ -6,6 +6,7 @@
 #include <ArduinoJson.h>
 
 // --- Function Declarations ---
+extern bool is_system_active;
 
 /**
  * @brief Sets up the pin modes for pumps and the pH sensor.

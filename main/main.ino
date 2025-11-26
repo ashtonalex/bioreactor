@@ -32,11 +32,15 @@ const char* command_topic = "v1/devices/me/rpc/request/+";
 long lastPublishTime = 0;
 const long PUBLISH_INTERVAL = 5000; // Publish data every 5 seconds (5000 ms)
 
+// --- Global State ---
+bool is_system_active = true; // Default to ON
+
 // --- Function Prototypes ---
 void print_wifi_info();
 void wifi_connect(float timeout = 15);
 void mqtt_callback(char* topic, byte* payload, unsigned int length);
 void attributes_callback(char* topic, byte* payload, unsigned int length);
+void handleGlobalAttributes(JsonObject& doc);
 void mqtt_reconnect();
 
 void setup() {
@@ -85,7 +89,12 @@ void loop() {
 
     getPHStatus(root);
     getStirringStatus(root);
+    getPHStatus(root);
+    getStirringStatus(root);
     getHeatingStatus(root);
+
+    // Global status
+    root["operational_mode"] = is_system_active;
 
     char buffer[500];
     serializeJson(doc, buffer);
@@ -142,9 +151,18 @@ void attributes_callback(char* topic, byte* payload, unsigned int length) {
   }
 
   // Dispatch to all subsystems to check for their keys
+  handleGlobalAttributes(shared);
   handlePHAttributes(shared);
   handleStirringAttributes(shared);
   handleHeatingAttributes(shared);
+}
+
+void handleGlobalAttributes(JsonObject& doc) {
+  if (doc.containsKey("operational_mode")) {
+    is_system_active = doc["operational_mode"];
+    Serial.print("Updated operational_mode: ");
+    Serial.println(is_system_active ? "ACTIVE" : "INACTIVE");
+  }
 }
 
 /**

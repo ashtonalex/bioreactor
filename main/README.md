@@ -53,7 +53,11 @@ The main loop aggregates status from all subsystems into a single JSON payload.
   // Heating Subsystem
   "temperature": 37.0,
   "heater_state": true,
-  "target_temperature": 37.0
+  "target_temperature": 37.0,
+
+  // Global Status
+  "operational_mode": true // true = Active, false = Inactive
+}
 }
 ```
 
@@ -72,6 +76,7 @@ Configuration parameters are managed via ThingsBoard Shared Attributes. The devi
 | `target_rpm` | int | Target Stirring Speed (500-1500 RPM) | Stirring |
 | `target_temperature` | float | Target Temperature in Celsius (e.g., 37.0) | Heating |
 | `temp_tolerance` | float | Hysteresis range for temperature control | Heating |
+| `operational_mode` | boolean | Master Switch (true = ON, false = OFF) | Global |
 
 ### 3. RPC Commands (Cloud -> Device)
 
