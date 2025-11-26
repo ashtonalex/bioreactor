@@ -7,6 +7,15 @@ const byte Pump1Pin = 4;  // Acid Pump
 const byte Pump2Pin = 5;  // Base Pump
 const byte pHPin = 36;    // pH Sensor Analog Pin (ADC1_CH0)
 
+#include "PHSubsystem.hpp"
+#include <Arduino.h>
+#include <ArduinoJson.h> 
+
+// --- Pin Definitions ---
+const byte Pump1Pin = 4;  // Acid Pump
+const byte Pump2Pin = 5;  // Base Pump
+const byte pHPin = 36;    // pH Sensor Analog Pin (ADC1_CH0)
+
 // --- Constants & Calibration (from SYSTEM.md) ---
 const float SLOPE = 0.54; 
 const float OFFSET = 0.58;
@@ -14,7 +23,7 @@ const int ARRAY_LENGTH = 10;
 
 // --- State Variables ---
 float targetPH = 5.0;
-const float tolerance = 0.4;
+float tolerance = 0.4;
 
 float pHArray[ARRAY_LENGTH];
 int pHArrayIndex = 0;
@@ -87,22 +96,13 @@ void executePH() {
                                                     // Main.ino includes "WiFi.h" which implies ESP32.
                                                     // I will use 4096.0 to be safe for ESP32, or should I stick to the code?
                                                     // The user said "The code in the .md file is the functional code".
-                                                    // I will stick to the formula but adjust the denominator if it's clearly ESP32.
-                                                    // Actually, let's stick to the user's formula but note the potential issue if values are weird.
-                                                    // Wait, `analogRead(pHPin)` on ESP32 is 12-bit. 
-                                                    // If I use 1024, the voltage will be 4x higher. 
-                                                    // I will assume the user wants the LOGIC, not necessarily the hardware-specific constants if they differ.
-                                                    // BUT, `SYSTEM.md` defines `SENSOR_PIN A0`.
-                                                    // I'll use the formula as is but with 4095.0 since `main.ino` uses `WiFi.h` (ESP32).
-                                                    
-  // Re-evaluating: The user said "integrate the functionality... code in .md is the functional code".
-  // If I change 1024 to 4095, I change the calibration.
-  // I will use the exact formula from SYSTEM.md but comment about the ADC resolution.
-  // Actually, `analogRead` resolution depends on the board.
-  // I will use `analogRead(pHPin) * 5.0 / 1024.0` as requested, but this is risky on ESP32.
-  // Let's look at PHSubsystem.cpp original code: `pH_raw = analogRead(pHPin);`
-  // It compared against 500-600.
-  // If I use the new logic, I must use the new formula.
+                                                    // If I change 1024 to 4095, I change the calibration.
+                                                    // I will use the exact formula from SYSTEM.md but comment about the ADC resolution.
+                                                    // Actually, `analogRead` resolution depends on the board.
+                                                    // I will use `analogRead(pHPin) * 5.0 / 1024.0` as requested, but this is risky on ESP32.
+                                                    // Let's look at PHSubsystem.cpp original code: `pH_raw = analogRead(pHPin);`
+                                                    // It compared against 500-600.
+                                                    // If I use the new logic, I must use the new formula.
   
   voltage = analogRead(pHPin) * 5.0 / 1024.0; 
   float pHValue = (SLOPE * voltage) + OFFSET;
@@ -168,5 +168,18 @@ void getPHStatus(JsonObject& doc) {
     char responseTopic[100];
     sprintf(responseTopic, "v1/devices/me/rpc/response/%s", requestId.c_str());
     client.publish(responseTopic, "{\"error\": \"Invalid parameters\"}");
+  }
+}
+
+void handlePHAttributes(JsonObject& doc) {
+  if (doc.containsKey("target_pH")) {
+    targetPH = doc["target_pH"];
+    Serial.print("Updated targetPH: ");
+    Serial.println(targetPH);
+  }
+  if (doc.containsKey("pH_tolerance")) {
+    tolerance = doc["pH_tolerance"];
+    Serial.print("Updated pH tolerance: ");
+    Serial.println(tolerance);
   }
 }

@@ -36,6 +36,7 @@ const long PUBLISH_INTERVAL = 5000; // Publish data every 5 seconds (5000 ms)
 void print_wifi_info();
 void wifi_connect(float timeout = 15);
 void mqtt_callback(char* topic, byte* payload, unsigned int length);
+void attributes_callback(char* topic, byte* payload, unsigned int length);
 void mqtt_reconnect();
 
 void setup() {
@@ -101,18 +102,49 @@ void mqtt_callback(char* topic, byte* payload, unsigned int length) {
   Serial.print("Message arrived on topic: ");
   Serial.println(topic);
 
-  // Pass the topic and payload to the subsystem to handle the command
-  // We pass the client to the subsystem to allow it to send RPC responses.
+  // Check if it's an attribute update or response
+  if (String(topic).startsWith("v1/devices/me/attributes")) {
+    attributes_callback(topic, payload, length);
+    return;
+  }
+
+  // Check if it's an RPC command
+  if (String(topic).startsWith("v1/devices/me/rpc/request/")) {
+    // Dispatch to PH subsystem for setPump commands
+    handlePHCommand(client, topic, payload, length);
+    
+    // Note: setRPM and setTemperature are now handled via attributes, so we don't call their command handlers.
+  }
+}
+
+void attributes_callback(char* topic, byte* payload, unsigned int length) {
+  Serial.println("Attributes update received");
   
-  // Dispatch to all subsystems. They should check if the command is for them.
-  // Ideally we would parse the method name here and dispatch, but for now passing to all is simpler
-  // if they handle their own method checks.
-  // However, handlePHCommand and handleHeatingCommand both deserialize. 
-  // It's better to deserialize once here if possible, but the current subsystem interface takes raw payload.
-  // So we will just call both.
+  StaticJsonDocument<500> doc;
+  DeserializationError error = deserializeJson(doc, payload, length);
+
+  if (error) {
+    Serial.print("deserializeJson() failed: ");
+    Serial.println(error.c_str());
+    return;
+  }
+
+  // If it's a response to our request (topic ends with /response/+)
+  // The payload structure might be {"client":{...}, "shared":{...}} or just the attributes depending on request
+  // But usually for "v1/devices/me/attributes" (push) it's just {"attr": val}
+  // For response, it is {"client":{...}, "shared":{...}}
   
-  handlePHCommand(client, topic, payload, length);
-  handleHeatingCommand(client, topic, payload, length);
+  JsonObject shared;
+  if (doc.containsKey("shared")) {
+    shared = doc["shared"];
+  } else {
+    shared = doc.as<JsonObject>();
+  }
+
+  // Dispatch to all subsystems to check for their keys
+  handlePHAttributes(shared);
+  handleStirringAttributes(shared);
+  handleHeatingAttributes(shared);
 }
 
 /**
@@ -126,8 +158,14 @@ void mqtt_reconnect() {
       Serial.println("connected");
       // Subscribe to the ThingsBoard RPC topic
       client.subscribe(command_topic);
-      Serial.print("Subscribed to: ");
-      Serial.println(command_topic);
+      // Subscribe to Attribute topics
+      client.subscribe("v1/devices/me/attributes"); // Server-side updates
+      client.subscribe("v1/devices/me/attributes/response/+"); // Initial request response
+      
+      Serial.print("Subscribed to RPC and Attributes");
+      
+      // Request initial attributes
+      client.publish("v1/devices/me/attributes/request/1", "{\"sharedKeys\":\"target_pH,pH_tolerance,target_temperature,temp_tolerance,target_rpm\"}");
     } else {
       Serial.print("failed, rc=");
       Serial.print(client.state());

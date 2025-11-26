@@ -176,34 +176,15 @@ void getStirringStatus(JsonObject& doc) {
 /**
  * @brief Handles the 'setRPM' RPC call.
  */
-void handleStirringCommand(PubSubClient& client, char* topic, byte* payload, unsigned int length) {
-  // 1. Get the RPC Request ID from the topic (e.g., "12345")
-  String topicStr = String(topic);
-  String requestId = topicStr.substring(topicStr.lastIndexOf('/') + 1);
-
-  // 2. Deserialize the incoming JSON command
-  StaticJsonDocument<200> doc;
-  deserializeJson(doc, payload, length);
-
-  // Expected RPC format: {"method": "setRPM", "params": 1000}
-  
-  // Extract the integer parameter directly from the "params" key
-  int new_rpm = doc["params"]; 
-  
-  if ((new_rpm >= 500 && new_rpm <= RPM_MAX) || new_rpm == 0) {
-    setspeed = (float)new_rpm; // Update the subsystem's setpoint
-    Serial.printf("RPC Command: Set RPM to %d\n", new_rpm);
-
-    // 3. Send successful response (return the new value)
-    char responseTopic[100];
-    sprintf(responseTopic, "v1/devices/me/rpc/response/%s", requestId.c_str());
-    client.publish(responseTopic, String(setspeed).c_str()); 
-    
-  } else {
-    Serial.println("RPC Error: RPM value outside valid range (0 or 500-1500).");
-    // 3. Send error response
-    char responseTopic[100];
-    sprintf(responseTopic, "v1/devices/me/rpc/response/%s", requestId.c_str());
-    client.publish(responseTopic, "{\"error\": \"RPM value must be 0 or 500-1500\"}");
+void handleStirringAttributes(JsonObject& doc) {
+  if (doc.containsKey("target_rpm")) {
+    int new_rpm = doc["target_rpm"];
+    if ((new_rpm >= 500 && new_rpm <= RPM_MAX) || new_rpm == 0) {
+      setspeed = (float)new_rpm;
+      Serial.print("Updated setspeed (RPM): ");
+      Serial.println(setspeed);
+    } else {
+      Serial.println("Attribute Error: target_rpm outside valid range (0 or 500-1500).");
+    }
   }
 }

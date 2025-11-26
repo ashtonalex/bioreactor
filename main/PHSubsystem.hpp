@@ -60,4 +60,10 @@ void getPHStatus(JsonObject& doc);
  */
 void handlePHCommand(PubSubClient& client, char* topic, byte* payload, unsigned int length);
 
+/**
+ * @brief Handles incoming Shared Attribute updates.
+ * @param doc The JsonObject containing the attributes.
+ */
+void handlePHAttributes(JsonObject& doc);
+
 #endif // PHSUBSYSTEM_HPP

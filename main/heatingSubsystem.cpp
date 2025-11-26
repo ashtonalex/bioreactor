@@ -2,14 +2,18 @@
 #include "heatingSubsystem.hpp"
 #include <Arduino.h>
 #include <ArduinoJson.h> // Required for JsonObject, StaticJsonDocument
+```cpp
+#include "heatingSubsystem.hpp"
+#include <Arduino.h>
+#include <ArduinoJson.h> // Required for JsonObject, StaticJsonDocument
 #include <PubSubClient.h> // Required for PubSubClient
 
 // Resistor R from Vcc (5 V?) to A0, thermistor from A0 to ground //
 
 const byte thermistorpin = A0;
 const byte heaterpin = 4;
-const float Tset = 35; // R=22k for Vcc = 6V
-const float deltaT = 0.5;
+float Tset = 35; // R=22k for Vcc = 6V
+float deltaT = 0.5;
 const float Vcc = 5;
 const float R = 18000;
 const float Ro = 10000;
@@ -84,6 +88,19 @@ void getHeatingStatus(JsonObject& doc) {
     doc["temperature"] = T;
     doc["heater_state"] = heater;
     doc["target_temperature"] = Tset;
+}
+
+void handleHeatingAttributes(JsonObject& doc) {
+  if (doc.containsKey("target_temperature")) {
+    Tset = doc["target_temperature"];
+    Serial.print("Updated target temperature: ");
+    Serial.println(Tset);
+  }
+  if (doc.containsKey("temp_tolerance")) {
+    deltaT = doc["temp_tolerance"];
+    Serial.print("Updated temp tolerance: ");
+    Serial.println(deltaT);
+  }
 }
 
 void handleHeatingCommand(PubSubClient& client, char* topic, byte* payload, unsigned int length) {

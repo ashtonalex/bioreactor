@@ -40,4 +40,10 @@ void executeStirring();
  */
 void getStirringStatus(JsonObject& doc);
 
+/**
+ * @brief Handles incoming Shared Attribute updates.
+ * @param doc The JsonObject containing the attributes.
+ */
+void handleStirringAttributes(JsonObject& doc);
+
 #endif // STIRRINGSUBSYSTEM_HPP
