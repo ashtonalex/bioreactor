@@ -1,8 +1,3 @@
-```cpp
-#include "heatingSubsystem.hpp"
-#include <Arduino.h>
-#include <ArduinoJson.h> // Required for JsonObject, StaticJsonDocument
-```cpp
 #include "heatingSubsystem.hpp"
 #include <Arduino.h>
 #include <ArduinoJson.h> // Required for JsonObject, StaticJsonDocument
@@ -35,8 +30,7 @@ void setupHeating()
   pinMode(LED_BUILTIN, OUTPUT);
   #endif
 
-  ledcSetup(1, 20000, 10); // Set PWM freq and resolution, on Channel 1, for ESP32
-  ledcAttachPin(heaterpin, 1);
+  ledcAttach(heaterpin, 20000, 10); // Set PWM freq and resolution, on Channel 1, for ESP32
   Vadc = Kadc * analogRead(thermistorpin);
 
   // Avoid division by zero if Vadc is Vcc (unlikely but possible)
@@ -52,7 +46,7 @@ void setupHeating()
   if(T > Tset + deltaT) { heater = false; } // Switch off heater if temperature rises above upper threshold
 
   if(heater != prevheater) { // Only write to the heater pin if its status has changed 
-    ledcWrite(1, heater ? 639 : 0); // Limit heater power to 30 W (approx 639/1023 duty cycle?) 10 bit is 1023. 
+    ledcWrite(heaterpin, heater ? 639 : 0); // Limit heater power to 30 W (approx 639/1023 duty cycle?) 10 bit is 1023. 
     // Note: Resolution is 10 bits (0-1023). 639 is ~62%.
     
     #ifdef LED_BUILTIN
@@ -69,7 +63,7 @@ void setupHeating()
   Serial.println(Vadc); Serial.println(Rth); Serial.println(T); Serial.println(' ');
  }
  */
-}
+
 
 void getHeatingStatus(JsonObject& doc) {
     doc["temperature"] = T;
@@ -118,4 +112,3 @@ void handleHeatingCommand(PubSubClient& client, char* topic, byte* payload, unsi
       // Unknown method
   }
 }
-```
