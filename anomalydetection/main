@@ -1,0 +1,409 @@
+# python main.py --stream nofaults
+# python main.py --stream single_fault --load-training training_data_XXXXXX.csv
+# python main.py --stream three_faults --load-training training_data_XXXXXX.csv
+
+import paho.mqtt.client as mqtt
+import json
+import numpy as np
+import time
+import argparse
+from datetime import datetime
+
+from detectors import (
+    ZScoreDetector,
+    HysteresisDetector,
+    SlidingWindowDetector,
+    ConfusionMatrix,
+)
+
+# ============================================================================
+# CONFIGURATION
+# ============================================================================
+
+BROKER = "engf0001.cs.ucl.ac.uk"
+PORT = 1883
+
+# Available streams
+STREAMS = {
+    "nofaults": "bioreactor_sim/nofaults/telemetry/summary",
+    "single_fault": "bioreactor_sim/single_fault/telemetry/summary",
+    "three_faults": "bioreactor_sim/three_faults/telemetry/summary",
+    "variable_setpoints": "bioreactor_sim/variable_setpoints/telemetry/summary",
+}
+
+# Signals to monitor
+SIGNALS = ["temp_mean", "ph_mean", "rpm_mean"]
+
+
+# ============================================================================
+# GLOBAL STATE
+# ============================================================================
+
+class DetectorState:
+    def __init__(self):
+        self.stream = "nofaults"
+        self.training_samples = 500
+        self.training_data = {sig: [] for sig in SIGNALS}
+        self.sample_count = 0
+        self.is_trained = False
+
+        # Independent detectors for each signal
+        # Each signal has 3 detectors that trigger independently
+        self.detectors = {
+            "temp_mean": {
+                "zscore": ZScoreDetector(threshold=3.0),
+                "hysteresis": HysteresisDetector(k=3.0, hysteresis_factor=0.5),
+                "sliding": SlidingWindowDetector(window_size=30, k=2.0),
+            },
+            "ph_mean": {
+                "zscore": ZScoreDetector(threshold=3.0),
+                "hysteresis": HysteresisDetector(k=3.0, hysteresis_factor=0.5),
+                "sliding": SlidingWindowDetector(window_size=30, k=2.0),
+            },
+            "rpm_mean": {
+                "zscore": ZScoreDetector(threshold=3.0),
+                "hysteresis": HysteresisDetector(k=3.0, hysteresis_factor=0.5),
+                "sliding": SlidingWindowDetector(window_size=30, k=2.0),
+            },
+        }
+
+        # Confusion matrices for each detector (only used during testing)
+        # Format: signal_detectortype
+        self.confusion_matrices = {}
+        for signal in SIGNALS:
+            for detector_name in ["zscore", "hysteresis", "sliding"]:
+                key = f"{signal}_{detector_name}"
+                self.confusion_matrices[key] = ConfusionMatrix(name=key)
+
+        # Overall confusion matrix (any detector triggers = anomaly)
+        self.overall_confusion = ConfusionMatrix(name="Overall (ANY detector)")
+
+        # Data logging
+        self.data_log = []
+
+
+state = DetectorState()
+
+
+# ============================================================================
+# TRAINING FUNCTIONS
+# ============================================================================
+
+def train_all_detectors():
+    """Train all detectors using collected nofaults data."""
+    print("\n" + "=" * 60)
+    print("TRAINING DETECTORS")
+    print("=" * 60)
+
+    for signal in SIGNALS:
+        print(f"\n{signal}:")
+        training_array = np.array(state.training_data[signal])
+
+        for detector_name, detector in state.detectors[signal].items():
+            print(f"  {detector_name}:")
+            detector.train(training_array)
+
+    state.is_trained = True
+    print("\n" + "=" * 60)
+    print("✓ Training complete!")
+    print("=" * 60)
+
+
+def save_training_data():
+    """Save training data to CSV for later use."""
+    filename = f"training_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+
+    with open(filename, "w") as f:
+        f.write(",".join(SIGNALS) + "\n")
+        for i in range(len(state.training_data[SIGNALS[0]])):
+            row = [str(state.training_data[sig][i]) for sig in SIGNALS]
+            f.write(",".join(row) + "\n")
+
+    print(f"✓ Training data saved to {filename}")
+    return filename
+
+
+def load_training_data(filename):
+    """Load training data from CSV file."""
+    print(f"Loading training data from {filename}...")
+
+    with open(filename, "r") as f:
+        lines = f.readlines()
+
+    # Skip header
+    for line in lines[1:]:
+        values = line.strip().split(",")
+        for i, signal in enumerate(SIGNALS):
+            state.training_data[signal].append(float(values[i]))
+
+    print(f"✓ Loaded {len(state.training_data[SIGNALS[0]])} samples")
+    train_all_detectors()
+
+
+# ============================================================================
+# MQTT CALLBACKS
+# ============================================================================
+
+def on_connect(client, userdata, flags, rc):
+    print(f"✓ Connected to broker (rc={rc})")
+    topic = STREAMS[state.stream]
+    client.subscribe(topic)
+    print(f"✓ Subscribed to: {topic}")
+
+    if state.stream == "nofaults" and not state.is_trained:
+        print(f"\n📊 TRAINING MODE: Collecting {state.training_samples} samples from nofaults...")
+    else:
+        print(f"\n🔍 TESTING MODE: Evaluating detectors on {state.stream}...")
+
+
+def on_message(client, userdata, msg):
+    """Process incoming MQTT message."""
+    raw = msg.payload.decode()
+
+    try:
+        data = json.loads(raw)
+
+        # Extract values
+        row = {
+            "timestamp": time.time(),
+            "temp_mean": data["temperature_C"]["mean"],
+            "ph_mean": data["pH"]["mean"],
+            "rpm_mean": data["rpm"]["mean"],
+            "heater_pwm": data["actuators_avg"]["heater_pwm"],
+            "motor_pwm": data["actuators_avg"]["motor_pwm"],
+            "acid_pwm": data["actuators_avg"]["acid_pwm"],
+            "base_pwm": data["actuators_avg"]["base_pwm"],
+            "faults": data["faults"]["last_active"],
+        }
+
+        state.sample_count += 1
+
+        # Training phase (nofaults stream, not yet trained)
+        if state.stream == "nofaults" and not state.is_trained:
+            process_training(row)
+        # Testing phase (fault streams OR nofaults after training)
+        elif state.is_trained:
+            process_testing(row)
+        else:
+            print("⚠️  Not trained yet. Run on nofaults first or load training data.")
+
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+def process_training(row):
+    """Collect training data from nofaults stream."""
+    # Collect samples
+    for signal in SIGNALS:
+        state.training_data[signal].append(row[signal])
+
+    # Progress update
+    if state.sample_count % 25 == 0:
+        print(f"  Collected {state.sample_count}/{state.training_samples} samples...")
+
+    # Check if training data collection is complete
+    if state.sample_count >= state.training_samples:
+        train_all_detectors()
+        save_training_data()
+        print("\n✓ You can now restart with a fault stream to test:")
+        print("  python main.py --stream single_fault --load-training <filename>")
+        print("\nOr press Ctrl+C to stop.\n")
+
+
+def process_testing(row):
+    """Test detectors and update confusion matrices."""
+    # Determine ground truth: is there actually a fault?
+    actual_fault = len(row["faults"]) > 0
+    faults_str = ",".join(row["faults"]) if row["faults"] else "none"
+
+    # Run each detector independently
+    any_anomaly = False
+    detector_results = {}
+
+    for signal in SIGNALS:
+        value = row[signal]
+
+        for detector_name, detector in state.detectors[signal].items():
+            # Get detector result
+            result = detector.update(value)
+
+            # Handle tuple vs bool return
+            if isinstance(result, tuple):
+                is_anomaly, score = result
+            else:
+                is_anomaly, score = result, float(result)
+
+            # Store result
+            key = f"{signal}_{detector_name}"
+            detector_results[key] = (is_anomaly, score)
+
+            # Update confusion matrix for this detector
+            state.confusion_matrices[key].update(is_anomaly, actual_fault)
+
+            if is_anomaly:
+                any_anomaly = True
+
+    # Update overall confusion matrix
+    result_type = state.overall_confusion.update(any_anomaly, actual_fault)
+
+    # Console output
+    result_emoji = {"TP": "✅", "TN": "✅", "FP": "⚠️ ", "FN": "❌"}.get(result_type, "?")
+    status = "🚨 ANOMALY" if any_anomaly else "✓ Normal"
+
+    # Print every sample or just important ones
+    if state.sample_count % 10 == 0 or any_anomaly or actual_fault:
+        print(f"#{state.sample_count:4d} | {status:12s} | Fault: {faults_str:30s} | {result_emoji} {result_type}")
+
+        # Show which detectors triggered
+        if any_anomaly:
+            triggered = [k for k, (anom, _) in detector_results.items() if anom]
+            print(f"       └─ Triggered: {', '.join(triggered)}")
+
+    # Log data
+    row["predicted_anomaly"] = any_anomaly
+    row["actual_fault"] = actual_fault
+    row["result"] = result_type
+    row["faults"] = faults_str
+    state.data_log.append(row)
+
+    # Periodic summary
+    if state.sample_count % 100 == 0:
+        print_interim_summary()
+
+
+def print_interim_summary():
+    """Print interim results."""
+    metrics = state.overall_confusion.get_metrics()
+    print(f"\n--- Interim ({metrics['total']} samples) ---")
+    print(f"TP={metrics['TP']} TN={metrics['TN']} FP={metrics['FP']} FN={metrics['FN']} | "
+          f"Acc={metrics['accuracy']:.1%} Prec={metrics['precision']:.1%} Rec={metrics['recall']:.1%}\n")
+
+
+def print_final_results():
+    """Print final confusion matrices for all detectors."""
+    print("\n" + "=" * 70)
+    print("FINAL RESULTS")
+    print("=" * 70)
+
+    # Overall results
+    state.overall_confusion.print_summary()
+
+    # Per-detector results table
+    print("\n" + "-" * 70)
+    print("PER-DETECTOR BREAKDOWN")
+    print("-" * 70)
+    print(f"{'Detector':<25} {'TP':>6} {'TN':>6} {'FP':>6} {'FN':>6} {'Acc':>8} {'Prec':>8} {'Rec':>8}")
+    print("-" * 70)
+
+    for signal in SIGNALS:
+        for detector_name in ["zscore", "hysteresis", "sliding"]:
+            key = f"{signal}_{detector_name}"
+            m = state.confusion_matrices[key].get_metrics()
+            print(f"{key:<25} {m['TP']:>6} {m['TN']:>6} {m['FP']:>6} {m['FN']:>6} "
+                  f"{m['accuracy']:>7.1%} {m['precision']:>7.1%} {m['recall']:>7.1%}")
+
+    print("-" * 70)
+
+    # Save results to file
+    save_results()
+
+
+def save_results():
+    """Save all results to CSV files."""
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+    # Save data log
+    if state.data_log:
+        data_file = f"{state.stream}_data_{timestamp}.csv"
+        with open(data_file, "w") as f:
+            headers = list(state.data_log[0].keys())
+            f.write(",".join(headers) + "\n")
+            for row in state.data_log:
+                values = [str(row[h]) for h in headers]
+                f.write(",".join(values) + "\n")
+        print(f"✓ Data saved to {data_file}")
+
+    # Save confusion matrix summary
+    summary_file = f"{state.stream}_summary_{timestamp}.csv"
+    with open(summary_file, "w") as f:
+        f.write("detector,TP,TN,FP,FN,accuracy,precision,recall,f1\n")
+
+        # Overall
+        m = state.overall_confusion.get_metrics()
+        f.write(f"OVERALL,{m['TP']},{m['TN']},{m['FP']},{m['FN']},"
+                f"{m['accuracy']:.4f},{m['precision']:.4f},{m['recall']:.4f},{m['f1']:.4f}\n")
+
+        # Per detector
+        for key, cm in state.confusion_matrices.items():
+            m = cm.get_metrics()
+            f.write(f"{key},{m['TP']},{m['TN']},{m['FP']},{m['FN']},"
+                    f"{m['accuracy']:.4f},{m['precision']:.4f},{m['recall']:.4f},{m['f1']:.4f}\n")
+
+    print(f"✓ Summary saved to {summary_file}")
+
+
+# ============================================================================
+# MAIN
+# ============================================================================
+
+def main():
+    parser = argparse.ArgumentParser(description="Bioreactor Anomaly Detector")
+    parser.add_argument("--stream", choices=STREAMS.keys(), default="nofaults",
+                        help="MQTT stream to subscribe to")
+    parser.add_argument("--training-samples", type=int, default=200,
+                        help="Number of samples for training (default: 200)")
+    parser.add_argument("--load-training", type=str, default=None,
+                        help="Load training data from CSV file")
+
+    args = parser.parse_args()
+
+    state.stream = args.stream
+    state.training_samples = args.training_samples
+
+    print("\n" + "=" * 60)
+    print("BIOREACTOR ANOMALY DETECTION SYSTEM")
+    print("=" * 60)
+    print(f"Stream: {state.stream}")
+    print(f"Broker: {BROKER}:{PORT}")
+
+    # Load training data if provided
+    if args.load_training:
+        load_training_data(args.load_training)
+    elif state.stream != "nofaults":
+        print("\n⚠️  WARNING: Testing on fault stream without training data!")
+        print("   Either:")
+        print("   1. Run on 'nofaults' first to train, or")
+        print("   2. Use --load-training <file> to load saved training data")
+        print("\n   Continuing anyway (detectors will use rolling statistics)...\n")
+
+    print("=" * 60 + "\n")
+
+    # Create MQTT client
+    client = mqtt.Client()
+    client.on_connect = on_connect
+    client.on_message = on_message
+
+    print(f"🔌 Connecting to {BROKER}:{PORT}...")
+
+    try:
+        client.connect(BROKER, PORT, 60)
+        print("👂 Listening... (Ctrl+C to stop)\n")
+        client.loop_forever()
+
+    except KeyboardInterrupt:
+        if state.is_trained and state.stream != "nofaults":
+            print_final_results()
+        elif state.stream == "nofaults" and state.is_trained:
+            print("\n✓ Training complete. Restart with a fault stream to test.")
+        else:
+            print("\n⚠️  Stopped before training completed.")
+
+    except Exception as e:
+        print(f"❌ Connection error: {e}")
+        print("Make sure you're on UCL network or connected via VPN!")
+
+
+if __name__ == "__main__":
+    main()
