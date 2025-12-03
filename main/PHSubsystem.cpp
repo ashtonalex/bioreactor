@@ -3,18 +3,9 @@
 #include <ArduinoJson.h> 
 
 // --- Pin Definitions ---
-const byte Pump1Pin = 4;  // Acid Pump
-const byte Pump2Pin = 5;  // Base Pump
-const byte pHPin = 36;    // pH Sensor Analog Pin (ADC1_CH0)
-
-#include "PHSubsystem.hpp"
-#include <Arduino.h>
-#include <ArduinoJson.h> 
-
-// --- Pin Definitions ---
-const byte Pump1Pin = 4;  // Acid Pump
-const byte Pump2Pin = 5;  // Base Pump
-const byte pHPin = 36;    // pH Sensor Analog Pin (ADC1_CH0)
+// const byte Pump1Pin = 4;  // Acid Pump
+// const byte Pump2Pin = 5;  // Base Pump
+// const byte pHPin = 36;    // pH Sensor Analog Pin (ADC1_CH0)
 
 // --- Constants & Calibration (from SYSTEM.md) ---
 const float SLOPE = 0.54; 
@@ -77,21 +68,8 @@ void setupPH() {
   pinMode(Pump2Pin, OUTPUT);
   digitalWrite(Pump1Pin, LOW); 
   digitalWrite(Pump2Pin, LOW);
-                                                    // mapping might be needed. 
-                                                    // I will use 4096.0 for ESP32 correctness if this is ESP32, 
-                                                    // but the file says "Arduino/bioreactor". 
-                                                    // Main.ino includes "WiFi.h" which implies ESP32.
-                                                    // I will use 4096.0 to be safe for ESP32, or should I stick to the code?
-                                                    // The user said "The code in the .md file is the functional code".
-                                                    // If I change 1024 to 4095, I change the calibration.
-                                                    // I will use the exact formula from SYSTEM.md but comment about the ADC resolution.
-                                                    // Actually, `analogRead` resolution depends on the board.
-                                                    // I will use `analogRead(pHPin) * 5.0 / 1024.0` as requested, but this is risky on ESP32.
-                                                    // Let's look at PHSubsystem.cpp original code: `pH_raw = analogRead(pHPin);`
-                                                    // It compared against 500-600.
-                                                    // If I use the new logic, I must use the new formula.
   
-  voltage = analogRead(pHPin) * 5.0 / 1024.0; 
+  float voltage = analogRead(pHPin) * 5.0 / 1024.0; 
   float pHValue = (SLOPE * voltage) + OFFSET;
   pHArray[pHArrayIndex++] = pHValue;
   
@@ -128,14 +106,25 @@ void setupPH() {
 }
 
 void getPHStatus(JsonObject& doc) {
+  doc["pH"] = currentPH;
+  doc["target_pH"] = targetPH;
+  doc["acid_pump"] = acid_on;
+  doc["base_pump"] = alkali_on;
+}
+
+void handlePHCommand(PubSubClient& client, char* topic, byte* payload, unsigned int length) {
+  StaticJsonDocument<200> doc;
   deserializeJson(doc, payload, length);
 
   // Expected RPC: {"method": "setPump", "params": {"pump": "acid", "duration": 500}}
-  // Or maybe setTargetPH? I'll keep the pump control for now as it was there.
   
   JsonObject params = doc["params"];
   const char* pump = params["pump"];     
   int duration = params["duration"] | 750; 
+
+  // Get request ID from topic
+  String topicStr = String(topic);
+  String requestId = topicStr.substring(topicStr.lastIndexOf('/') + 1);
 
   if (pump) { 
     if (strcmp(pump, "acid") == 0) {
@@ -149,8 +138,6 @@ void getPHStatus(JsonObject& doc) {
     client.publish(responseTopic, "{\"status\": \"ok\", \"pump\": \"" + String(pump) + "\"}");
     
   } else {
-    // Check for setTargetPH maybe?
-    // For now, just error if not pump command
     Serial.println("RPC Error: 'pump' parameter missing.");
     char responseTopic[100];
     sprintf(responseTopic, "v1/devices/me/rpc/response/%s", requestId.c_str());

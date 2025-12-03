@@ -212,7 +212,7 @@ void print_wifi_info ()
   }
 }
 
-void wifi_connect ( float timeout = 15 )
+void wifi_connect ( float timeout )
 {
   unsigned long deadline;
 

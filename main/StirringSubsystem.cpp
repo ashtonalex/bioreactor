@@ -43,9 +43,9 @@ float deltaT = 0;
 int Vmotor = 0;
 
 // --- Pin Definitions (Need to be consistent across all files) ---
-const byte ENCODER_PIN = 2;   
-const byte MOTOR_PIN   = 10;  
-const byte LED_RED_PIN = LED_RED; 
+// const byte ENCODER_PIN = 2;   // Removed: Defined in .hpp
+// const byte MOTOR_PIN   = 10;  // Removed: Defined in .hpp
+// const byte LED_RED_PIN = LED_RED; // Removed: Defined in .hpp
 
 
 // -------------------------------------------------------------
@@ -80,9 +80,8 @@ void setupStirring() {
   pinMode(LED_RED_PIN, OUTPUT);
 
   // PWM setup on MOTOR_PIN (D10)
-  ledcSetup(0, 20000, 10); 
-  ledcAttachPin(MOTOR_PIN, 0);
-  ledcWrite(0, 0); 
+  ledcAttach(MOTOR_PIN, 20000, 10);
+  ledcWrite(MOTOR_PIN, 0); 
 
   // Hall sensor interrupt
   attachInterrupt(digitalPinToInterrupt(ENCODER_PIN), Tsense, RISING);
@@ -102,7 +101,7 @@ void setupStirring() {
 void executeStirring() {
   // 1. Safety Check: If system is not active, force off and exit
   if (!is_system_active) {
-    ledcWrite(0, 0); // Force PWM duty cycle to 0
+    ledcWrite(MOTOR_PIN, 0); // Force PWM duty cycle to 0
     return; 
   }
 
@@ -150,7 +149,7 @@ void executeStirring() {
     Vmotor = round(pwmScale * (Kp * error + KIinterror));
 
     Vmotor = constrain(Vmotor, 0, 1023); 
-    ledcWrite(0, Vmotor);
+    ledcWrite(MOTOR_PIN, Vmotor);
 
     // Filtered RPM for display
     meanmeasspeed = 0.1 * measspeed + 0.9 * meanmeasspeed;
