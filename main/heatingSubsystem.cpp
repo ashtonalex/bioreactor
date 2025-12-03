@@ -7,8 +7,8 @@
 
 const byte thermistorpin = A0;
 const byte heaterpin = 4;
-float Tset = 35; // R=22k for Vcc = 6V
-float deltaT = 0.5;
+static float Tset = 35; // R=22k for Vcc = 6V
+static float deltaT = 0.5;
 const float Vcc = 5;
 const float R = 18000;
 const float Ro = 10000;
@@ -16,21 +16,24 @@ const float To = 25;
 const float beta = 4220; // Renamed from ebeta to beta to match formula usage
 const float Kadc = 3.3 / 4095;
 
-float Vadc, T, Rth;
-unsigned long currtime, prevtime, T1, T2; // Changed to unsigned long
-bool heater = false;
-bool prevheater = false;
+static float Vadc, T, Rth;
+static unsigned long currtime, prevtime, T1, T2; // Changed to unsigned long
+static bool heater = false;
+static bool prevheater = false;
 
 void setupHeating() 
 {
   pinMode(thermistorpin, INPUT);
   pinMode(heaterpin, OUTPUT);
-  // pinMode(LED_BUILTIN, OUTPUT); // LED_BUILTIN might not be defined on all boards, check if needed. Keeping it if it was there.
   #ifdef LED_BUILTIN
   pinMode(LED_BUILTIN, OUTPUT);
   #endif
 
   ledcAttach(heaterpin, 20000, 10); // Set PWM freq and resolution, on Channel 1, for ESP32
+}
+
+void executeHeating()
+{
   Vadc = Kadc * analogRead(thermistorpin);
 
   // Avoid division by zero if Vadc is Vcc (unlikely but possible)
@@ -39,7 +42,7 @@ void setupHeating()
       T = (To + 273) * beta / (beta + (To + 273) * log(Rth / Ro)) - 273; // Calculate temperature from thermistor resistance
   } else {
       // Handle error or saturation
-      T = 999.0; // Error value
+      T = 999.0; 
   }
 
   if(T < Tset - deltaT) { heater = true; } // Switch on heater if temperature falls below lower threshold
@@ -47,23 +50,13 @@ void setupHeating()
 
   if(heater != prevheater) { // Only write to the heater pin if its status has changed 
     ledcWrite(heaterpin, heater ? 639 : 0); // Limit heater power to 30 W (approx 639/1023 duty cycle?) 10 bit is 1023. 
-    // Note: Resolution is 10 bits (0-1023). 639 is ~62%.
     
     #ifdef LED_BUILTIN
-    digitalWrite(LED_BUILTIN, heater); // Write also to the on-board LED, for testing
+    digitalWrite(LED_BUILTIN, heater); 
     #endif
     prevheater = heater;
   }
- }
-  
- // Print temperature etc once per second, for testing only - moved to telemetry
- /*
- if(currtime - T2 > 1000) {
-  T2 = currtime; 
-  Serial.println(Vadc); Serial.println(Rth); Serial.println(T); Serial.println(' ');
- }
- */
-
+}
 
 void getHeatingStatus(JsonObject& doc) {
     doc["temperature"] = T;
@@ -94,9 +87,6 @@ void handleHeatingCommand(PubSubClient& client, char* topic, byte* payload, unsi
   deserializeJson(doc, payload, length);
   
   // Example: {"method": "setTemperature", "params": 37.0}
-  // Currently just logging as placeholder, as Tset is const in the original code.
-  // If we want to make Tset variable, we need to remove 'const' from Tset declaration.
-  // For now, I will just acknowledge the command.
   
   const char* method = doc["method"];
   
