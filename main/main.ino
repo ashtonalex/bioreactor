@@ -137,11 +137,6 @@ void attributes_callback(char* topic, byte* payload, unsigned int length) {
     Serial.println(error.c_str());
     return;
   }
-
-  // If it's a response to our request (topic ends with /response/+)
-  // The payload structure might be {"client":{...}, "shared":{...}} or just the attributes depending on request
-  // But usually for "v1/devices/me/attributes" (push) it's just {"attr": val}
-  // For response, it is {"client":{...}, "shared":{...}}
   
   JsonObject shared;
   if (doc.containsKey("shared")) {

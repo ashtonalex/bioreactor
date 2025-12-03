@@ -35,12 +35,12 @@ volatile long pulseTime = 0;
 volatile int count = 0;         
 volatile bool blinkk = false;   
 
-long currtime, prevtime, T1;
-float measspeed = 0;
-float error = 0;
-float KIinterror = 0;
-float deltaT = 0;
-int Vmotor = 0;
+static long currtime, prevtime, T1;
+static float measspeed = 0;
+static float error = 0;
+static float KIinterror = 0;
+static float deltaT = 0;
+static int Vmotor = 0;
 
 // --- Pin Definitions (Need to be consistent across all files) ---
 // const byte ENCODER_PIN = 2;   // Removed: Defined in .hpp
