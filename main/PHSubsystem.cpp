@@ -7,17 +7,18 @@
 #define ACID_PIN 8
 #define ALKALI_PIN 9
 
-// --- State Variables (from PHCHANGES.md) ---
-float targetPH = 5.0;
+// --- State Variables (from PHCHANGES2.md) ---
+float targetPH = 0.0; // Start with no target (pumps off until set)
 float tolerance = 0.4; // Not const, to allow updates via attributes
 
 const int ARRAY_LENGTH = 10;
 float pHArray[ARRAY_LENGTH];
-int pHArrayIndex = 0;
+int pHArrayIndex = 0; // NOTE: newPH.cpp uses -1 but that causes undefined behavior
 
 long timeMS, t1;
+long timeAfterCalibration; // Added from newPH.cpp
 
-float linearCoefficients[2] = {0, 0};
+float linearCoefficients[2] = {1.38, 0.76}; // slope, offset - pre-calibrated defaults
 
 int doneCalibrating = 0;
 
@@ -29,6 +30,8 @@ bool alkali_on = false;
 // --- Helper Functions (from PHCHANGES.md) ---
 
 // code from: https://jwbrooks.blogspot.com/2014/02/arduino-linear-regression-function.html?m=1
+// code from: https://jwbrooks.blogspot.com/2014/02/arduino-linear-regression-function.html?m=1
+// Updated formula from newPH.cpp for consistency with new pH calculation
 void simpLinReg(float* x, float* y, float* lrCoef, int n){
   // pass x and y arrays (pointers), lrCoef pointer, and n.  The lrCoef array is comprised of the slope=lrCoef[0] and intercept=lrCoef[1].  n is length of the x and y arrays.
   // http://en.wikipedia.org/wiki/Simple_linear_regression
@@ -46,14 +49,11 @@ void simpLinReg(float* x, float* y, float* lrCoef, int n){
     xybar=xybar+x[i]*y[i];
     xsqbar=xsqbar+x[i]*x[i];
   }
-  xbar=xbar/n;
-  ybar=ybar/n;
-  xybar=xybar/n;
-  xsqbar=xsqbar/n;
+  // Note: Using summed values directly (not normalized) per newPH.cpp formula
   
-  // simple linear regression algorithm
-  lrCoef[0]=(xybar-xbar*ybar)/(xsqbar-xbar*xbar);
-  lrCoef[1]=ybar-lrCoef[0]*xbar;
+  // simple linear regression algorithm (updated from newPH.cpp)
+  lrCoef[0]=(n*xybar-xbar*ybar)/(n*xsqbar-xbar*xbar);
+  lrCoef[1]=(ybar/n)-(lrCoef[0]*(xbar/n));
 }
 
 // altered code from: https://wiki.dfrobot.com/PH_meter_SKU__SEN0161_
@@ -98,26 +98,27 @@ float get_average(float* arr, int length) {
   return avg;
 }
 
+// Calibration routine updated from newPH.cpp
+// Note: xArray/yArray swapped to match new formula (pH = slope*voltage + offset)
 void calibrate(float* lrCoef) {
-  float xArray[3] = {4, 7, 10};
-  float yArray[3];
-  // float knownPH = 1.0; // Unused in original code
+  float yArray[3] = {4, 7, 10}; // Known pH values
+  float xArray[3]; // Measured voltages
   
   int numOfReadings = 50;
   for (int i = 0; i < 3; i++) {
     int doneRinsing = 0;
-    // float voltage = analogRead(SENSOR_PIN) * 3.3 / 1024.0;
-
+    Serial.println("Rinse the probe and then enter y");
+    
     while (doneRinsing == 0) {
       if (Serial.available()) {
         String userInput = Serial.readStringUntil('\n');
         userInput.trim();
 
         if (userInput == "y") {
-        Serial.println("Wait 1 minute for values to stabilise");
-        delay(60000);
-        Serial.println("Taking average now");
-        doneRinsing = 1;
+          Serial.println("Wait 1 minute for values to stabilise");
+          delay(60000);
+          Serial.println("Taking average now");
+          doneRinsing = 1;
         }
         else {
           Serial.println("Ignored... please type y, after rinsing.");
@@ -126,17 +127,24 @@ void calibrate(float* lrCoef) {
     }
 
     float voltageSum = 0;
-    for (int i = 0; i < numOfReadings+1; i++) {
+    for (int j = 0; j < numOfReadings+1; j++) { // Changed loop var to 'j' to avoid shadowing
       voltageSum = voltageSum + analogRead(SENSOR_PIN) * 3.3 / 1024.0;
       delay(100);
     }
 
     float averageVoltage = voltageSum / numOfReadings;
 
-    yArray[i] = averageVoltage;
+    xArray[i] = averageVoltage; // Store voltage in xArray (swapped from original)
     Serial.println("Done, rinse now.");
   }
   simpLinReg(xArray, yArray, linearCoefficients, 3);
+  
+  // Output calibration results (from newPH.cpp)
+  Serial.print("Slope: ");
+  Serial.print(linearCoefficients[0]);
+  Serial.print(" Y-intercept: ");
+  Serial.print(linearCoefficients[1]);
+  Serial.println();
 }
 
 /**
@@ -165,15 +173,29 @@ void setupPH() {
   digitalWrite(ACID_PIN, LOW);
   digitalWrite(ALKALI_PIN, LOW);
 
-  calibrate(linearCoefficients);
+  // Calibration is now optional - using pre-calibrated defaults
+  // Uncomment the line below to enable calibration on startup
+  // calibrate(linearCoefficients);
   doneCalibrating = 1;
+  timeAfterCalibration = millis(); // Track time from startup
 }
 
 void executePH() {
   if (doneCalibrating == 1) {
-    // read voltage and convert to pH
+    // Check for serial input to change target pH (from newPH.cpp)
+    if (Serial.available()) {
+      String userInput = Serial.readStringUntil('\n');
+      userInput.trim();
+
+      if (userInput.length() > 0) {
+        targetPH = userInput.toFloat();
+        Serial.println("Input received, changing pH");
+      }
+    }
+    
+    // read voltage and convert to pH (updated formula from newPH.cpp)
     float voltage = analogRead(SENSOR_PIN) * 3.3 / 1024.0;
-    float pHValue = (voltage - linearCoefficients[1])/linearCoefficients[0];
+    float pHValue = (linearCoefficients[0] * voltage) + linearCoefficients[1];
     pHArray[pHArrayIndex++] = pHValue;
 
     // once buffer full, calculate average
@@ -185,31 +207,41 @@ void executePH() {
       acid_on = false;
       alkali_on = false;
 
-      if (currentPH > targetPH + tolerance) {
-        // pH too high, add acid
-        digitalWrite(ACID_PIN, HIGH);
-        digitalWrite(ALKALI_PIN, LOW);
-        acid_on = true;
-      } else if (currentPH < targetPH - tolerance) {
-        // pH too low, add alkali
-        digitalWrite(ACID_PIN, LOW);
-        digitalWrite(ALKALI_PIN, HIGH);
-        alkali_on = true;
+      // Safety check: only activate pumps if targetPH is set (from newPH.cpp)
+      if (targetPH != 0.0) {
+        if (currentPH > (targetPH + tolerance)) {
+          // pH too high, add acid
+          digitalWrite(ACID_PIN, HIGH);
+          digitalWrite(ALKALI_PIN, LOW);
+          acid_on = true;
+        } else if (currentPH < (targetPH - tolerance)) {
+          // pH too low, add alkali
+          digitalWrite(ACID_PIN, LOW);
+          digitalWrite(ALKALI_PIN, HIGH);
+          alkali_on = true;
+        } else {
+          // pH within tolerance, turn off both pumps
+          digitalWrite(ACID_PIN, LOW);
+          digitalWrite(ALKALI_PIN, LOW);
+        }
       } else {
-        // pH within tolerance, turn off both pumps
+        // No target set, ensure both pumps are off
         digitalWrite(ACID_PIN, LOW);
         digitalWrite(ALKALI_PIN, LOW);
       }
 
-      timeMS = millis();
+      // Time tracking relative to calibration (from newPH.cpp)
+      timeMS = millis() - timeAfterCalibration;
       if (timeMS - t1 > 0) {
         t1 = t1 + 1000;
-        // Serial.println(currentPH, acid_on, alkali_on)
         Serial.print("time: ");
         Serial.print(t1 / 1000);
         Serial.print(" | ");
         Serial.print("current pH: ");
         Serial.print(currentPH);
+        Serial.print(" | ");
+        Serial.print("set pH: ");
+        Serial.print(targetPH);
         Serial.print(" | ");
         Serial.print("alkali: ");
         Serial.print(alkali_on);
@@ -220,9 +252,7 @@ void executePH() {
       }
     }
 
-    // set a timer for micro seconds
-    // assign a variable to microseconds
-    delay(100);  // Small delay between samples
+    delay(1);  // Reduced delay from newPH.cpp (was 100ms)
   }
 }
 
