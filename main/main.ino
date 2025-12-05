@@ -89,8 +89,6 @@ void loop() {
 
     getPHStatus(root);
     getStirringStatus(root);
-    getPHStatus(root);
-    getStirringStatus(root);
     getHeatingStatus(root);
 
     // Global status

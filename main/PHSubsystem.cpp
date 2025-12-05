@@ -61,7 +61,7 @@ float get_average(float* arr, int length) {
   int i;
   float max, min;
   float avg;
-  long amount = 0;
+  float amount = 0.0; // Fixed: was 'long', causing precision loss with float accumulation
   if (length <= 0) {
     Serial.println("Error length for the array to averaging!/n");
     return 0;
@@ -127,7 +127,7 @@ void calibrate(float* lrCoef) {
     }
 
     float voltageSum = 0;
-    for (int j = 0; j < numOfReadings+1; j++) { // Changed loop var to 'j' to avoid shadowing
+    for (int j = 0; j < numOfReadings; j++) { // Fixed: was numOfReadings+1, causing off-by-one
       voltageSum = voltageSum + analogRead(SENSOR_PIN) * 3.3 / 1024.0;
       delay(100);
     }

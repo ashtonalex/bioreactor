@@ -6,34 +6,6 @@
 #include <ArduinoJson.h>
 
 // --- Function Declarations ---
-extern bool is_system_active;
-
-/**
- * @brief Sets up the pin modes for pumps and the pH sensor.
- */
-void setupPH();
-
-/**
- * @brief Main execution loop for the pH subsystem.
- * Handles reading sensors and autonomous control.
- */
-void executePH();
-
-/**
- * @brief Populates the passed JSON object with the current pH status.
- * @param doc The JsonObject to populate.
- */
-void getPHStatus(JsonObject& doc);
-
-/**
-#ifndef PHSUBSYSTEM_HPP
-#define PHSUBSYSTEM_HPP
-
-// We need PubSubClient to be able to publish
-#include <PubSubClient.h>
-#include <ArduinoJson.h>
-
-// --- Function Declarations ---
 
 /**
  * @brief Sets up the pin modes for pumps and the pH sensor.
