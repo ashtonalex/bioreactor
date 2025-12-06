@@ -4,7 +4,7 @@
 // Wi-Fi Credentials
 #define USE_EDUROAM 1 // Set to 1 if you use eduroam, 0 for standard WiFi
 #define WIFI_SSID "eduroam"
-#define WIFI_PASS "OnakBakok13@"
+#define WIFI_PASS "OnakBakok13@Onak"
 #define WIFI_USER "zcabag2@ucl.ac.uk" // Only used if USE_EDUROAM is 1
 
 // --- ThingsBoard Credentials ---

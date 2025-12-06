@@ -44,14 +44,21 @@ void handleGlobalAttributes(JsonObject& doc);
 void mqtt_reconnect();
 
 void setup() {
+
+  Serial.println("Initialising...");
   Serial.begin(115200);
   Serial.println("Booting Bioreactor pH Controller (ThingsBoard)...");
 
   // Setup subsystem hardware pins
   setupPH();
+  Serial.println("ph done");
+
   setupStirring(); // <-- CALL STIRRING SETUP
+  Serial.println("stirring done");
+
   setupHeating();
-  
+  Serial.println("heating done");
+
   // Connect to WiFi
   wifi_connect();
 
@@ -69,7 +76,7 @@ void loop() {
     wifi_connect();
   }
   
-  if (!client.connected()) {
+  if (WiFi.status() == WL_CONNECTED && !client.connected()) {
     mqtt_reconnect(); // Reconnect to MQTT broker if disconnected
   }
 
@@ -162,8 +169,16 @@ void handleGlobalAttributes(JsonObject& doc) {
  * @brief Reconnects to the MQTT broker and subscribes to command topic.
  */
 void mqtt_reconnect() {
-  while (!client.connected()) {
-    Serial.print("Attempting MQTT connection...");
+  int retries = 0;
+  const int MAX_RETRIES = 5;
+  
+  while (!client.connected() && retries < MAX_RETRIES) {
+    Serial.print("Attempting MQTT connection (");
+    Serial.print(retries + 1);
+    Serial.print("/");
+    Serial.print(MAX_RETRIES);
+    Serial.print(")...");
+    
     // Attempt to connect using Access Token (as MQTT_USER)
     if (client.connect(mqtt_client_id, MQTT_USER, MQTT_PASS)) {
       Serial.println("connected");
@@ -183,7 +198,12 @@ void mqtt_reconnect() {
       Serial.println(" try again in 5 seconds");
       // Wait 5 seconds before retrying
       delay(5000);
+      retries++;
     }
+  }
+  
+  if (!client.connected()) {
+    Serial.println("MQTT connection failed after max retries. Continuing without MQTT.");
   }
 }
 
@@ -212,17 +232,17 @@ void wifi_connect ( float timeout )
   WiFi.disconnect(true);
   WiFi.mode(WIFI_STA);
 
-  #if USE_EDUROAM
-    Serial.printf("Connecting to eduroam as user %s\n", user);
-    esp_eap_client_set_identity((uint8_t *)user, strlen(user));
-    esp_eap_client_set_username((uint8_t *)user, strlen(user));
-    esp_eap_client_set_password((uint8_t *)pass, strlen(pass));
-    esp_wifi_sta_enterprise_enable();
-    WiFi.begin(ssid);
-  #else
-    Serial.printf("Connecting to %s\n", ssid);
-    WiFi.begin(ssid, pass);
-  #endif
+#if USE_EDUROAM
+  Serial.printf("Connecting to eduroam as user %s\n", user);
+  esp_eap_client_set_identity((uint8_t *)user, strlen(user));
+  esp_eap_client_set_username((uint8_t *)user, strlen(user));
+  esp_eap_client_set_password((uint8_t *)pass, strlen(pass));
+  esp_wifi_sta_enterprise_enable();
+  WiFi.begin(ssid);
+#else
+  Serial.printf("Connecting to %s\n", ssid);
+  WiFi.begin(ssid, pass);
+#endif
   
   deadline = millis() + (unsigned long)(timeout * 1000);
 

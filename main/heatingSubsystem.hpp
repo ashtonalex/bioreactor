@@ -10,5 +10,7 @@ void setupHeating();
 void executeHeating();
 void getHeatingStatus(JsonObject& doc);
 void handleHeatingAttributes(JsonObject& doc);
+void handleHeatingCommand(PubSubClient& client, char* topic, byte* payload, unsigned int length);
 
 #endif
+

@@ -3,64 +3,79 @@
 #include <ArduinoJson.h> // Required for JsonObject, StaticJsonDocument
 #include <PubSubClient.h> // Required for PubSubClient
 
-// Resistor R from Vcc (5 V?) to A0, thermistor from A0 to ground //
+// Configuration from heating.cpp
+// Resistor R from Vcc to thermistor pin, thermistor from pin to ground
 
-const byte thermistorpin = A0;
-const byte heaterpin = 4;
-static float Tset = 35; // R=22k for Vcc = 6V
+const byte thermistorpin = A5;
+const byte heaterpin = 6;
+static float Tset = 35;
 static float deltaT = 0.5;
-const float Vcc = 5;
-const float R = 18000;
-const float Ro = 10000;
-const float To = 25;
-const float beta = 4220; // Renamed from ebeta to beta to match formula usage
+const float Vcc = 3.3;
+const float R = 10000;
 const float Kadc = 3.3 / 4095;
 
 static float Vadc, T, Rth;
-static unsigned long currtime, prevtime, T1, T2; // Changed to unsigned long
-static bool heater = false;
-static bool prevheater = false;
+static unsigned long currtime, T1, T2;
+static int heaterPWM = 0;
+static int prevHeaterPWM = 0;
 
 void setupHeating() 
 {
-  pinMode(thermistorpin, INPUT);
   pinMode(heaterpin, OUTPUT);
   #ifdef LED_BUILTIN
   pinMode(LED_BUILTIN, OUTPUT);
   #endif
 
-  ledcAttach(heaterpin, 20000, 10); // Set PWM freq and resolution, on Channel 1, for ESP32
+  T1 = micros();
+  T2 = T1;
 }
 
 void executeHeating()
 {
-  Vadc = Kadc * analogRead(thermistorpin);
+  currtime = micros();
 
-  // Avoid division by zero if Vadc is Vcc (unlikely but possible)
-  if (abs(Vcc - Vadc) > 0.01) {
+  // Execute heating control every 100ms (100000 microseconds)
+  if (currtime - T1 >= 100000) {
+    T1 = currtime;
+
+    Vadc = Kadc * analogRead(thermistorpin);
+    
+    // Avoid division by zero if Vadc is Vcc (unlikely but possible)
+    if (abs(Vcc - Vadc) > 0.01) {
       Rth = R * Vadc / (Vcc - Vadc); // Calculate thermistor resistance from ADC voltage
-      T = (To + 273) * beta / (beta + (To + 273) * log(Rth / Ro)) - 273; // Calculate temperature from thermistor resistance
-  } else {
+      T = -0.00295 * Rth + 50.23; // Linear temperature calculation from heating.cpp
+    } else {
       // Handle error or saturation
       T = 999.0; 
+    }
+
+    // Hysteresis control logic
+    if (T < Tset - deltaT) { heaterPWM = 255; } // Switch on heater if temperature falls below lower threshold
+    if (T > Tset - deltaT) { heaterPWM = 0; } // Switch off heater if temperature rises above threshold
+
+    // Only write to the heater pin if its status has changed 
+    if (heaterPWM != prevHeaterPWM) {
+      analogWrite(heaterpin, heaterPWM);
+      
+      #ifdef LED_BUILTIN
+      digitalWrite(LED_BUILTIN, heaterPWM > 0); 
+      #endif
+      prevHeaterPWM = heaterPWM;
+    }
   }
 
-  if(T < Tset - deltaT) { heater = true; } // Switch on heater if temperature falls below lower threshold
-  if(T > Tset + deltaT) { heater = false; } // Switch off heater if temperature rises above upper threshold
-
-  if(heater != prevheater) { // Only write to the heater pin if its status has changed 
-    ledcWrite(heaterpin, heater ? 639 : 0); // Limit heater power to 30 W (approx 639/1023 duty cycle?) 10 bit is 1023. 
-    
-    #ifdef LED_BUILTIN
-    digitalWrite(LED_BUILTIN, heater); 
-    #endif
-    prevheater = heater;
+  // Serial debug output every 1 second (1000000 microseconds)
+  if (currtime - T2 >= 1000000) {
+    T2 = currtime;
+    Serial.print("Rth: "); Serial.print(Rth, 0);
+    Serial.print(" | T: "); Serial.print(T, 1);
+    Serial.print(" | Heater: "); Serial.println(heaterPWM > 0 ? "ON" : "OFF");
   }
 }
 
 void getHeatingStatus(JsonObject& doc) {
     doc["temperature"] = T;
-    doc["heater_state"] = heater;
+    doc["heater_state"] = heaterPWM > 0;
     doc["target_temperature"] = Tset;
 }
 
@@ -91,13 +106,12 @@ void handleHeatingCommand(PubSubClient& client, char* topic, byte* payload, unsi
   const char* method = doc["method"];
   
   if (strcmp(method, "setTemperature") == 0) {
-      // TODO: Make Tset non-const to allow changing it.
-      // float newTemp = doc["params"];
-      // Tset = newTemp; 
+      float newTemp = doc["params"];
+      Tset = newTemp; 
       
       char responseTopic[100];
       sprintf(responseTopic, "v1/devices/me/rpc/response/%s", requestId.c_str());
-      client.publish(responseTopic, "{\"status\": \"error\", \"message\": \"Temperature setting not implemented yet (const Tset)\"}");
+      client.publish(responseTopic, "{\"status\": \"ok\", \"message\": \"Temperature target updated\"}");
   } else {
       // Unknown method
   }
