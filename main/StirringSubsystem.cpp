@@ -42,11 +42,6 @@ static float KIinterror = 0;
 static float deltaT = 0;
 static int Vmotor = 0;
 
-// --- Pin Definitions (Need to be consistent across all files) ---
-// const byte ENCODER_PIN = 2;   // Removed: Defined in .hpp
-// const byte MOTOR_PIN   = 10;  // Removed: Defined in .hpp
-// const byte LED_RED_PIN = LED_RED; // Removed: Defined in .hpp
-
 
 // -------------------------------------------------------------
 // 1. INTERRUPT SERVICE ROUTINE (ISR)
@@ -131,12 +126,17 @@ void executeStirring() {
     prevtime = currtime;
     T1 += CONTROL_INTERVAL_US; 
 
+    // Disable interrupts while reading ISR-shared variables to prevent race conditions
+    noInterrupts();
     long Tsens = pulseT[0] - pulseT[7];
+    long localPulseTime = pulseTime;
+    interrupts();
+    
     if (Tsens <= 0) Tsens = 1;
 
     measspeed = 7.0 * freqtoRPM * 1e6 / (float)Tsens;
 
-    if (currtime - pulseTime > 100000) {
+    if (currtime - localPulseTime > 100000) {
       measspeed = 0;
     }
 
@@ -157,12 +157,13 @@ void executeStirring() {
     // Serial Plotter logging
     unsigned long ms = currtime / 1000ul;
 
-    Serial.print("time:");
-    Serial.print(ms);
-    Serial.print("  set:");
-    Serial.print(setspeed);
-    Serial.print("  rpm:");
-    Serial.println(meanmeasspeed);
+    // Serial.print("time:");
+    // Serial.print(ms);
+    // Serial.print("  set:");
+    // Serial.print(setspeed);
+    // Serial.print("  rpm:");
+    // Serial.println(meanmeasspeed);
+    
   }
 }
 
