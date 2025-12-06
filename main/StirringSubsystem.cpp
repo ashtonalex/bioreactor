@@ -41,6 +41,7 @@ static float error = 0;
 static float KIinterror = 0;
 static float deltaT = 0;
 static int Vmotor = 0;
+static int currentPWM = 0;  // Track current PWM for soft-start ramping
 
 
 // -------------------------------------------------------------
@@ -149,7 +150,16 @@ void executeStirring() {
     Vmotor = round(pwmScale * (Kp * error + KIinterror));
 
     Vmotor = constrain(Vmotor, 0, 1023); 
-    ledcWrite(MOTOR_PIN, Vmotor);
+    
+    // Soft-start: Ramp PWM gradually to prevent power spikes
+    // Max change of 50 units per control cycle (~10ms) = ~500ms for full ramp
+    if (Vmotor > currentPWM) {
+      currentPWM = min(currentPWM + 50, Vmotor);
+    } else if (Vmotor < currentPWM) {
+      currentPWM = max(currentPWM - 50, Vmotor);
+    }
+    
+    ledcWrite(MOTOR_PIN, currentPWM);
 
     // Filtered RPM for display
     meanmeasspeed = 0.1 * measspeed + 0.9 * meanmeasspeed;
