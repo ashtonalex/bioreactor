@@ -6,16 +6,14 @@ import sys
 
 # Configuration
 # Update these to match your actual MQTT broker settings
-BROKER = "engf0001.cs.ucl.ac.uk" 
+BROKER = "mqtt.eu.thingsboard.cloud" 
 PORT = 1883
-# Topic where the bioreactor publishes telemetry. 
-# If using ThingsBoard directly, this might be different, but for a logger 
-# we often subscribe to a topic where the device publishes.
-# Assuming a standard topic structure or that we are simulating the cloud side.
+ACCESS_TOKEN = "ujp5e0v81hgvbkr2e4el"  # Replace with your device access token
+
 TOPIC = "v1/devices/me/telemetry" 
 OUTPUT_FILE = "logs/bioreactor_data.csv"
 
-def on_connect(client, userdata, flags, rc):
+def on_connect(client, userdata, flags, rc, properties=None):
     print(f"Connected with result code {rc}")
     client.subscribe(TOPIC)
     print(f"Subscribed to {TOPIC}")
@@ -38,8 +36,8 @@ def on_message(client, userdata, msg):
         # Map booleans/states to PWM (0 or 100) if actual PWM not available
         heater_pwm = 100 if data.get("heater_state", False) else 0
         motor_pwm = 100 if data.get("rpm_set", 0) > 0 else 0 # Simplified assumption
-        acid_pwm = 100 if data.get("acid_state", False) else 0
-        base_pwm = 100 if data.get("base_state", False) else 0
+        acid_pwm = 100 if data.get("acid_pump", False) else 0
+        base_pwm = 100 if data.get("base_pump", False) else 0
         
         faults = "None" # Placeholder as faults might not be in standard telemetry
         
@@ -61,9 +59,12 @@ def setup_csv():
 if __name__ == "__main__":
     setup_csv()
     
-    client = mqtt.Client()
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
     client.on_connect = on_connect
     client.on_message = on_message
+    
+    # Authenticate with ThingsBoard using access token
+    client.username_pw_set(ACCESS_TOKEN)
     
     print(f"Connecting to {BROKER}...")
     try:
