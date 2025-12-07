@@ -13,10 +13,11 @@ from detectors import (
     SlidingWindowDetector,
 )
 
-BROKER = "engf0001.cs.ucl.ac.uk"
+BROKER = "mqtt.eu.thingsboard.cloud"
 PORT = 1883
+ACCESS_TOKEN = "ujp5e0v81hgvbkr2e4el"  # Replace with your device access token
 STREAM = "nofaults"
-TOPIC = f"bioreactor_sim/{STREAM}/telemetry/summary"
+TOPIC = f"v1/devices/me/telemetry"
 
 # Initialize detectors
 detectors = {
@@ -66,7 +67,7 @@ def process_data_point(row):
             print(f"  [DRIFT] {signal} showing drift={drift:.2f}")
             log_anomaly(signal, "sliding_window", value, drift)
 
-def on_connect(client, userdata, flags, rc):
+def on_connect(client, userdata, flags, rc, properties=None):
     print(f"\nConnected to broker with result code: {rc}")
     client.subscribe(TOPIC)
     print(f"Subscribed to topic: {TOPIC}")
@@ -81,16 +82,18 @@ def on_message(client, userdata, msg):
     try:
         data = json.loads(raw)
 
+        # Map fields from flat JSON telemetry payload (see README.md)
         row = {
             "timestamp": time.time(),
-            "temp_mean": data["temperature_C"]["mean"],
-            "ph_mean": data["pH"]["mean"],
-            "rpm_mean": data["rpm"]["mean"],
-            "heater_pwm": data["actuators_avg"]["heater_pwm"],
-            "motor_pwm": data["actuators_avg"]["motor_pwm"],
-            "acid_pwm": data["actuators_avg"]["acid_pwm"],
-            "base_pwm": data["actuators_avg"]["base_pwm"],
-            "faults": ",".join(data["faults"]["last_active"])
+            "temp_mean": data.get("temperature", 0.0),
+            "ph_mean": data.get("pH", 0.0),
+            "rpm_mean": data.get("rpm_measured", 0.0),
+            # Map boolean states to PWM-like values (0 or 100) since actual PWM not in telemetry
+            "heater_pwm": 100 if data.get("heater_state", False) else 0,
+            "motor_pwm": 100 if data.get("rpm_set", 0) > 0 else 0,
+            "acid_pwm": 100 if data.get("acid_pump", False) else 0,
+            "base_pwm": 100 if data.get("base_pump", False) else 0,
+            "faults": "None"  # Faults not included in current telemetry payload
         }
         
         # Save raw data for record
@@ -138,10 +141,13 @@ if __name__ == "__main__":
     else:
         # Create MQTT client and register callbacks
         import paho.mqtt.client as mqtt
-        client = mqtt.Client()
+        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
         client.on_connect = on_connect
         client.on_message = on_message
 
+        # Authenticate with ThingsBoard using access token
+        client.username_pw_set(ACCESS_TOKEN)
+        
         # Connect to broker and start listening
         print(f"Connecting to {BROKER}:{PORT} ...")
         client.connect(BROKER, PORT, 60)
