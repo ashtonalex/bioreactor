@@ -93,6 +93,157 @@ Remote Procedure Calls (RPC) are used for immediate actions or manual overrides.
 
 ---
 
+## Subsystem Connectivity
+
+This section describes how the main controller (`main.ino`) connects with and orchestrates the subsystems (pH, Stirring, Heating).
+
+### Architecture Overview
+
+```mermaid
+graph TD
+    subgraph ESP32["ESP32 (main.ino)"]
+        MQTT["MQTT Client<br/>(PubSubClient)"]
+        LOOP["Main Loop"]
+        ATTR_CB["attributes_callback()"]
+        MQTT_CB["mqtt_callback()"]
+    end
+    
+    subgraph Subsystems
+        PH["PHSubsystem"]
+        STIR["StirringSubsystem"]
+        HEAT["HeatingSubsystem"]
+    end
+    
+    subgraph ThingsBoard["ThingsBoard Cloud"]
+        TEL_TOPIC["v1/devices/me/telemetry"]
+        ATTR_TOPIC["v1/devices/me/attributes"]
+        RPC_TOPIC["v1/devices/me/rpc/request/+"]
+    end
+    
+    LOOP -->|"executePH()"| PH
+    LOOP -->|"executeStirring()"| STIR
+    LOOP -->|"executeHeating()"| HEAT
+    
+    LOOP -->|"getPHStatus()"| PH
+    LOOP -->|"getStirringStatus()"| STIR
+    LOOP -->|"getHeatingStatus()"| HEAT
+    
+    MQTT -->|"PUBLISH"| TEL_TOPIC
+    ATTR_TOPIC -->|"SUBSCRIBE"| MQTT
+    RPC_TOPIC -->|"SUBSCRIBE"| MQTT
+    
+    MQTT_CB --> ATTR_CB
+    ATTR_CB -->|"handlePHAttributes()"| PH
+    ATTR_CB -->|"handleStirringAttributes()"| STIR
+    ATTR_CB -->|"handleHeatingAttributes()"| HEAT
+```
+
+### Subsystem Interface Contract
+
+Each subsystem exposes a standard set of functions that `main.ino` calls:
+
+| Function | Purpose | Called From |
+| :--- | :--- | :--- |
+| `setup[Subsystem]()` | Initialize hardware pins and sensors | `setup()` |
+| `execute[Subsystem]()` | Run control loop logic (non-blocking) | `loop()` |
+| `get[Subsystem]Status(JsonObject&)` | Populate telemetry payload | Telemetry publish block |
+| `handle[Subsystem]Attributes(JsonObject&)` | Process attribute updates | `attributes_callback()` |
+| `handle[Subsystem]Command(...)` | Process RPC commands (optional) | `mqtt_callback()` |
+
+### Telemetry Publishing Flow (Device → Cloud)
+
+Every 5 seconds (`PUBLISH_INTERVAL`), the main loop aggregates data from all subsystems:
+
+```text
+1. main.ino creates a JsonObject (root)
+2. Calls getPHStatus(root)     → Adds: pH, target_pH, acid_pump, base_pump
+3. Calls getStirringStatus(root) → Adds: rpm_set, rpm_measured
+4. Calls getHeatingStatus(root)  → Adds: temperature, heater_state, target_temperature
+5. Adds global: operational_mode
+6. Serializes and publishes to "v1/devices/me/telemetry"
+```
+
+**Published Payload Example:**
+
+```json
+{
+  "pH": 6.8,
+  "target_pH": 7.0,
+  "acid_pump": false,
+  "base_pump": true,
+  "rpm_set": 800,
+  "rpm_measured": 795,
+  "temperature": 36.5,
+  "heater_state": true,
+  "target_temperature": 37.0,
+  "operational_mode": true
+}
+```
+
+### Attribute Subscription Flow (Cloud → Device)
+
+When ThingsBoard sends an attribute update:
+
+```text
+1. MQTT client receives message on "v1/devices/me/attributes"
+2. mqtt_callback() routes to attributes_callback()
+3. attributes_callback() parses JSON and dispatches to:
+   - handleGlobalAttributes(shared)   → operational_mode
+   - handlePHAttributes(shared)       → target_pH, pH_tolerance
+   - handleStirringAttributes(shared) → target_rpm
+   - handleHeatingAttributes(shared)  → target_temperature, temp_tolerance
+4. Each subsystem checks for its keys and updates internal state
+```
+
+**Attribute Key → Subsystem Mapping:**
+
+| Key | Handler | Internal Variable |
+| :--- | :--- | :--- |
+| `operational_mode` | `handleGlobalAttributes()` | `is_system_active` |
+| `target_pH` | `handlePHAttributes()` | `targetPH` |
+| `pH_tolerance` | `handlePHAttributes()` | `tolerance` |
+| `target_rpm` | `handleStirringAttributes()` | `setspeed` |
+| `target_temperature` | `handleHeatingAttributes()` | `Tset` |
+| `temp_tolerance` | `handleHeatingAttributes()` | `deltaT` |
+
+### RPC Command Flow (Cloud → Device)
+
+For immediate actions (e.g., manual pump control):
+
+```text
+1. MQTT client receives on "v1/devices/me/rpc/request/{requestId}"
+2. mqtt_callback() identifies RPC request
+3. Dispatches to handlePHCommand() for pump control
+4. Handler executes action and publishes response to:
+   "v1/devices/me/rpc/response/{requestId}"
+```
+
+**Supported RPC Methods:**
+
+| Method | Handler | Params | Action |
+| :--- | :--- | :--- | :--- |
+| `setPump` | `handlePHCommand()` | `{"pump": "acid"/"base", "duration": ms}` | Pulses pump |
+| `setTemperature` | `handleHeatingCommand()` | `37.0` (float) | Sets target temp |
+
+### Startup Sequence
+
+```text
+setup()
+├── setupPH()        → Initialize pH sensor, pump pins
+├── setupStirring()  → Initialize motor PWM, hall sensor interrupt
+├── setupHeating()   → Initialize thermistor, heater PWM
+├── wifi_connect()   → Connect to WiFi
+└── client.setServer() / client.setCallback() → Configure MQTT
+
+mqtt_reconnect()
+├── Subscribe to "v1/devices/me/rpc/request/+"
+├── Subscribe to "v1/devices/me/attributes"
+├── Subscribe to "v1/devices/me/attributes/response/+"
+└── Request initial attributes (target_pH, target_rpm, target_temperature, etc.)
+```
+
+---
+
 ## Subsystem Integration Guide
 
 To add a new subsystem (e.g., `DO_Subsystem` for Dissolved Oxygen), follow this pattern:

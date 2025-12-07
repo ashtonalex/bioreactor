@@ -181,6 +181,15 @@ void setupPH() {
 }
 
 void executePH() {
+  // Safety Check: If system is not active, force pumps off and exit
+  if (!is_system_active) {
+    digitalWrite(ACID_PIN, LOW);
+    digitalWrite(ALKALI_PIN, LOW);
+    acid_on = false;
+    alkali_on = false;
+    return;
+  }
+
   if (doneCalibrating == 1) {
     // Check for serial input to change target pH (from newPH.cpp)
     if (Serial.available()) {

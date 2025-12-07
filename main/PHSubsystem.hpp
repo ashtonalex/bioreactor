@@ -5,6 +5,9 @@
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 
+// --- Global State ---
+extern bool is_system_active;
+
 // --- Function Declarations ---
 
 /**
