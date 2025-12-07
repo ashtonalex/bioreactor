@@ -32,6 +32,13 @@ void setupHeating()
 
 void executeHeating()
 {
+  // Safety Check: If system is not active, force heater off and exit
+  if (!is_system_active) {
+    analogWrite(heaterpin, 0);
+    prevHeaterPWM = 0;
+    return;
+  }
+
   currtime = micros();
 
   // Execute heating control every 100ms (100000 microseconds)
